@@ -288,7 +288,7 @@ broadcast({
 - [ ] Agent counter updates when sub-agents spawn
 - [ ] Charlie's orchestration posts to new endpoints
 - [ ] No memory leaks from SSE connections
-- [ ] Works on M4 after git pull
+- [ ] Works on production server after git pull
 
 ## Files to Modify/Create
 

@@ -8,7 +8,11 @@ import { AgentModal } from './AgentModal';
 
 type FilterTab = 'all' | 'working' | 'standby';
 
-export function AgentsSidebar() {
+interface AgentsSidebarProps {
+  workspaceId?: string;
+}
+
+export function AgentsSidebar({ workspaceId }: AgentsSidebarProps) {
   const { agents, selectedAgent, setSelectedAgent, agentOpenClawSessions, setAgentOpenClawSession } = useMissionControl();
   const [filter, setFilter] = useState<FilterTab>('all');
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -248,12 +252,13 @@ export function AgentsSidebar() {
 
       {/* Modals */}
       {showCreateModal && (
-        <AgentModal onClose={() => setShowCreateModal(false)} />
+        <AgentModal onClose={() => setShowCreateModal(false)} workspaceId={workspaceId} />
       )}
       {editingAgent && (
         <AgentModal
           agent={editingAgent}
           onClose={() => setEditingAgent(null)}
+          workspaceId={workspaceId}
         />
       )}
     </aside>

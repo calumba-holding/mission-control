@@ -1,8 +1,8 @@
 /**
  * File Download API
  * Returns file content over HTTP from the server filesystem.
- * This enables remote agents (like Charlie on M1) to read files from
- * the Mission Control server (M4).
+ * This enables remote agents to read files from
+ * the Mission Control server.
  */
 
 import { NextRequest, NextResponse } from 'next/server';

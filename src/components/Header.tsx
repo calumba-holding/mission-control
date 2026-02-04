@@ -2,13 +2,19 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Zap, Settings } from 'lucide-react';
+import Link from 'next/link';
+import { Zap, Settings, ChevronLeft, LayoutGrid } from 'lucide-react';
 import { useMissionControl } from '@/lib/store';
 import { format } from 'date-fns';
+import type { Workspace } from '@/lib/types';
 
-export function Header() {
+interface HeaderProps {
+  workspace?: Workspace;
+}
+
+export function Header({ workspace }: HeaderProps) {
   const router = useRouter();
-  const { agents, tasks, isOnline, selectedBusiness, setSelectedBusiness } = useMissionControl();
+  const { agents, tasks, isOnline } = useMissionControl();
   const [currentTime, setCurrentTime] = useState(new Date());
   const [activeSubAgents, setActiveSubAgents] = useState(0);
 
@@ -53,33 +59,51 @@ export function Header() {
           </span>
         </div>
 
-        {/* Business Selector */}
-        <select
-          value={selectedBusiness}
-          onChange={(e) => setSelectedBusiness(e.target.value)}
-          className="bg-mc-bg-tertiary border border-mc-border rounded px-3 py-1 text-sm text-mc-text focus:outline-none focus:border-mc-accent"
-        >
-          <option value="all">All Businesses</option>
-          <option value="default">Default Workspace</option>
-        </select>
+        {/* Workspace indicator or back to dashboard */}
+        {workspace ? (
+          <div className="flex items-center gap-2">
+            <Link
+              href="/"
+              className="flex items-center gap-1 text-mc-text-secondary hover:text-mc-accent transition-colors"
+            >
+              <ChevronLeft className="w-4 h-4" />
+              <LayoutGrid className="w-4 h-4" />
+            </Link>
+            <span className="text-mc-text-secondary">/</span>
+            <div className="flex items-center gap-2 px-3 py-1 bg-mc-bg-tertiary rounded">
+              <span className="text-lg">{workspace.icon}</span>
+              <span className="font-medium">{workspace.name}</span>
+            </div>
+          </div>
+        ) : (
+          <Link
+            href="/"
+            className="flex items-center gap-2 px-3 py-1 bg-mc-bg-tertiary rounded hover:bg-mc-bg transition-colors"
+          >
+            <LayoutGrid className="w-4 h-4" />
+            <span className="text-sm">All Workspaces</span>
+          </Link>
+        )}
       </div>
 
-      {/* Center: Stats */}
-      <div className="flex items-center gap-8">
-        <div className="text-center">
-          <div className="text-2xl font-bold text-mc-accent-cyan">{activeAgents}</div>
-          <div className="text-xs text-mc-text-secondary uppercase">Agents Active</div>
+      {/* Center: Stats - only show in workspace view */}
+      {workspace && (
+        <div className="flex items-center gap-8">
+          <div className="text-center">
+            <div className="text-2xl font-bold text-mc-accent-cyan">{activeAgents}</div>
+            <div className="text-xs text-mc-text-secondary uppercase">Agents Active</div>
+          </div>
+          <div className="text-center">
+            <div className="text-2xl font-bold text-mc-accent-purple">{tasksInQueue}</div>
+            <div className="text-xs text-mc-text-secondary uppercase">Tasks in Queue</div>
+          </div>
         </div>
-        <div className="text-center">
-          <div className="text-2xl font-bold text-mc-accent-purple">{tasksInQueue}</div>
-          <div className="text-xs text-mc-text-secondary uppercase">Tasks in Queue</div>
-        </div>
-      </div>
+      )}
 
       {/* Right: Time & Status */}
       <div className="flex items-center gap-4">
         <span className="text-mc-text-secondary text-sm font-mono">
-          {format(currentTime, 'HH:mm:ss')} AM
+          {format(currentTime, 'HH:mm:ss')}
         </span>
         <div
           className={`flex items-center gap-2 px-3 py-1 rounded border text-sm font-medium ${

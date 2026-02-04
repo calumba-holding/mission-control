@@ -7,7 +7,12 @@ import type { Task, TaskStatus } from '@/lib/types';
 import { TaskModal } from './TaskModal';
 import { formatDistanceToNow } from 'date-fns';
 
+interface MissionQueueProps {
+  workspaceId?: string;
+}
+
 const COLUMNS: { id: TaskStatus; label: string; color: string }[] = [
+  { id: 'planning', label: '📋 PLANNING', color: 'border-t-mc-accent-purple' },
   { id: 'inbox', label: 'INBOX', color: 'border-t-mc-accent-pink' },
   { id: 'assigned', label: 'ASSIGNED', color: 'border-t-mc-accent-yellow' },
   { id: 'in_progress', label: 'IN PROGRESS', color: 'border-t-mc-accent' },
@@ -16,7 +21,7 @@ const COLUMNS: { id: TaskStatus; label: string; color: string }[] = [
   { id: 'done', label: 'DONE', color: 'border-t-mc-accent-green' },
 ];
 
-export function MissionQueue() {
+export function MissionQueue({ workspaceId }: MissionQueueProps) {
   const { tasks, updateTaskStatus, addEvent } = useMissionControl();
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
@@ -129,10 +134,10 @@ export function MissionQueue() {
 
       {/* Modals */}
       {showCreateModal && (
-        <TaskModal onClose={() => setShowCreateModal(false)} />
+        <TaskModal onClose={() => setShowCreateModal(false)} workspaceId={workspaceId} />
       )}
       {editingTask && (
-        <TaskModal task={editingTask} onClose={() => setEditingTask(null)} />
+        <TaskModal task={editingTask} onClose={() => setEditingTask(null)} workspaceId={workspaceId} />
       )}
     </div>
   );

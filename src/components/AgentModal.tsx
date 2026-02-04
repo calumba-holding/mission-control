@@ -8,11 +8,12 @@ import type { Agent, AgentStatus } from '@/lib/types';
 interface AgentModalProps {
   agent?: Agent;
   onClose: () => void;
+  workspaceId?: string;
 }
 
 const EMOJI_OPTIONS = ['🤖', '🦞', '💻', '🔍', '✍️', '🎨', '📊', '🧠', '⚡', '🚀', '🎯', '🔧'];
 
-export function AgentModal({ agent, onClose }: AgentModalProps) {
+export function AgentModal({ agent, onClose, workspaceId }: AgentModalProps) {
   const { addAgent, updateAgent, agents } = useMissionControl();
   const [activeTab, setActiveTab] = useState<'info' | 'soul' | 'user' | 'agents'>('info');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -40,7 +41,10 @@ export function AgentModal({ agent, onClose }: AgentModalProps) {
       const res = await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
+        body: JSON.stringify({
+          ...form,
+          workspace_id: workspaceId || agent?.workspace_id || 'default',
+        }),
       });
 
       if (res.ok) {

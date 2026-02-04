@@ -1,24 +1,27 @@
 'use client';
 
 import { useState } from 'react';
-import { X, Save, Trash2, Activity, Package, Bot } from 'lucide-react';
+import { X, Save, Trash2, Activity, Package, Bot, ClipboardList } from 'lucide-react';
 import { useMissionControl } from '@/lib/store';
 import { ActivityLog } from './ActivityLog';
 import { DeliverablesList } from './DeliverablesList';
 import { SessionsList } from './SessionsList';
+import { PlanningTab } from './PlanningTab';
 import type { Task, TaskPriority, TaskStatus } from '@/lib/types';
 
-type TabType = 'overview' | 'activity' | 'deliverables' | 'sessions';
+type TabType = 'overview' | 'planning' | 'activity' | 'deliverables' | 'sessions';
 
 interface TaskModalProps {
   task?: Task;
   onClose: () => void;
+  workspaceId?: string;
 }
 
-export function TaskModal({ task, onClose }: TaskModalProps) {
+export function TaskModal({ task, onClose, workspaceId }: TaskModalProps) {
   const { agents, addTask, updateTask, addEvent } = useMissionControl();
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [activeTab, setActiveTab] = useState<TabType>('overview');
+  // Auto-switch to planning tab if task is in planning status
+  const [activeTab, setActiveTab] = useState<TabType>(task?.status === 'planning' ? 'planning' : 'overview');
 
   const [form, setForm] = useState({
     title: task?.title || '',
@@ -41,6 +44,7 @@ export function TaskModal({ task, onClose }: TaskModalProps) {
         ...form,
         assigned_agent_id: form.assigned_agent_id || null,
         due_date: form.due_date || null,
+        workspace_id: workspaceId || task?.workspace_id || 'default',
       };
 
       const res = await fetch(url, {
@@ -89,11 +93,12 @@ export function TaskModal({ task, onClose }: TaskModalProps) {
     }
   };
 
-  const statuses: TaskStatus[] = ['inbox', 'assigned', 'in_progress', 'testing', 'review', 'done'];
+  const statuses: TaskStatus[] = ['planning', 'inbox', 'assigned', 'in_progress', 'testing', 'review', 'done'];
   const priorities: TaskPriority[] = ['low', 'normal', 'high', 'urgent'];
 
   const tabs = [
     { id: 'overview' as TabType, label: 'Overview', icon: null },
+    { id: 'planning' as TabType, label: 'Planning', icon: <ClipboardList className="w-4 h-4" /> },
     { id: 'activity' as TabType, label: 'Activity', icon: <Activity className="w-4 h-4" /> },
     { id: 'deliverables' as TabType, label: 'Deliverables', icon: <Package className="w-4 h-4" /> },
     { id: 'sessions' as TabType, label: 'Sessions', icon: <Bot className="w-4 h-4" /> },
@@ -227,6 +232,17 @@ export function TaskModal({ task, onClose }: TaskModalProps) {
             />
           </div>
             </form>
+          )}
+
+          {/* Planning Tab */}
+          {activeTab === 'planning' && task && (
+            <PlanningTab 
+              taskId={task.id} 
+              onSpecLocked={() => {
+                // Refresh task data when spec is locked
+                window.location.reload();
+              }}
+            />
           )}
 
           {/* Activity Tab */}

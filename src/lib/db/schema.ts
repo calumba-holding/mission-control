@@ -1,6 +1,26 @@
-// Database schema for Mission Control
+/**
+ * Database Schema for Mission Control
+ * 
+ * This defines the current desired schema state.
+ * For existing databases, migrations handle schema updates.
+ * 
+ * IMPORTANT: When adding new tables or columns:
+ * 1. Add them here for new databases
+ * 2. Create a migration in migrations.ts for existing databases
+ */
 
 export const schema = `
+-- Workspaces table
+CREATE TABLE IF NOT EXISTS workspaces (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  slug TEXT NOT NULL UNIQUE,
+  description TEXT,
+  icon TEXT DEFAULT '📁',
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+
 -- Agents table
 CREATE TABLE IF NOT EXISTS agents (
   id TEXT PRIMARY KEY,
@@ -10,6 +30,7 @@ CREATE TABLE IF NOT EXISTS agents (
   avatar_emoji TEXT DEFAULT '🤖',
   status TEXT DEFAULT 'standby' CHECK (status IN ('standby', 'working', 'offline')),
   is_master INTEGER DEFAULT 0,
+  workspace_id TEXT DEFAULT 'default' REFERENCES workspaces(id),
   soul_md TEXT,
   user_md TEXT,
   agents_md TEXT,
@@ -22,14 +43,39 @@ CREATE TABLE IF NOT EXISTS tasks (
   id TEXT PRIMARY KEY,
   title TEXT NOT NULL,
   description TEXT,
-  status TEXT DEFAULT 'inbox' CHECK (status IN ('inbox', 'assigned', 'in_progress', 'testing', 'review', 'done')),
+  status TEXT DEFAULT 'inbox' CHECK (status IN ('planning', 'inbox', 'assigned', 'in_progress', 'testing', 'review', 'done')),
   priority TEXT DEFAULT 'normal' CHECK (priority IN ('low', 'normal', 'high', 'urgent')),
   assigned_agent_id TEXT REFERENCES agents(id),
   created_by_agent_id TEXT REFERENCES agents(id),
+  workspace_id TEXT DEFAULT 'default' REFERENCES workspaces(id),
   business_id TEXT DEFAULT 'default',
   due_date TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
+);
+
+-- Planning questions table
+CREATE TABLE IF NOT EXISTS planning_questions (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  category TEXT NOT NULL,
+  question TEXT NOT NULL,
+  question_type TEXT DEFAULT 'multiple_choice' CHECK (question_type IN ('multiple_choice', 'text', 'yes_no')),
+  options TEXT,
+  answer TEXT,
+  answered_at TEXT,
+  sort_order INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- Planning specs table (locked specifications)
+CREATE TABLE IF NOT EXISTS planning_specs (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL UNIQUE REFERENCES tasks(id) ON DELETE CASCADE,
+  spec_markdown TEXT NOT NULL,
+  locked_at TEXT NOT NULL,
+  locked_by TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
 );
 
 -- Conversations table (agent-to-agent or task-related)
@@ -72,7 +118,7 @@ CREATE TABLE IF NOT EXISTS events (
   created_at TEXT DEFAULT (datetime('now'))
 );
 
--- Businesses/Workspaces table
+-- Businesses/Workspaces table (legacy - kept for compatibility)
 CREATE TABLE IF NOT EXISTS businesses (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -119,10 +165,13 @@ CREATE TABLE IF NOT EXISTS task_deliverables (
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_assigned ON tasks(assigned_agent_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_workspace ON tasks(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_agents_workspace ON agents(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status);
 CREATE INDEX IF NOT EXISTS idx_activities_task ON task_activities(task_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_deliverables_task ON task_deliverables(task_id);
 CREATE INDEX IF NOT EXISTS idx_openclaw_sessions_task ON openclaw_sessions(task_id);
+CREATE INDEX IF NOT EXISTS idx_planning_questions_task ON planning_questions(task_id, sort_order);
 `;

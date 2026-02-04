@@ -262,7 +262,7 @@ POST /api/tasks/[id]/activities
 - ✅ Real-time UI updates
 
 ### Manual Testing
-- ✅ Tested on M4 (localhost:3000)
+- ✅ Tested on production server (localhost:3000)
 - ✅ Tested with multiple browsers
 - ✅ Tested under load (50+ concurrent clients)
 - ✅ Memory leak testing (no leaks detected)
@@ -347,7 +347,7 @@ await fetch(`/api/tasks/${task.id}`, {
 
 ## 🚀 Deployment Notes
 
-### On M4 (Production)
+### On production server (Production)
 
 ```bash
 cd ~/Documents/Shared/mission-control

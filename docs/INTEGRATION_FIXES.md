@@ -208,7 +208,7 @@ See `docs/CHARLIE_WORKFLOW.md` for complete details.
 
 1. **Test end-to-end:** Charlie should test the workflow with a real task
 2. **Push to GitHub:** Commit all changes
-3. **Deploy:** Deploy to production (M4 machine)
+3. **Deploy:** Deploy to production (production server machine)
 4. **Monitor:** Watch real-time updates in action
 
 ---

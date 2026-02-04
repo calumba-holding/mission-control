@@ -8,7 +8,7 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:3000 (M4) or http://localhost:3000 (local)
+Open http://localhost:3000 (production server) or http://localhost:3000 (local)
 
 ## Test Scenarios
 
@@ -333,7 +333,7 @@ wait
 - [ ] Task modal tabs work without closing modal
 - [ ] Database migrations work without errors
 - [ ] No memory leaks from SSE connections
-- [ ] Works on M4 after git pull and npm install
+- [ ] Works on production server after git pull and npm install
 
 ## API Endpoint Reference
 

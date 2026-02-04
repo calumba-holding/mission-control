@@ -10,6 +10,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const status = searchParams.get('status');
     const businessId = searchParams.get('business_id');
+    const workspaceId = searchParams.get('workspace_id');
     const assignedAgentId = searchParams.get('assigned_agent_id');
 
     let sql = `
@@ -39,6 +40,10 @@ export async function GET(request: NextRequest) {
     if (businessId) {
       sql += ' AND t.business_id = ?';
       params.push(businessId);
+    }
+    if (workspaceId) {
+      sql += ' AND t.workspace_id = ?';
+      params.push(workspaceId);
     }
     if (assignedAgentId) {
       sql += ' AND t.assigned_agent_id = ?';
@@ -82,9 +87,11 @@ export async function POST(request: NextRequest) {
     const id = uuidv4();
     const now = new Date().toISOString();
 
+    const workspaceId = (body as { workspace_id?: string }).workspace_id || 'default';
+    
     run(
-      `INSERT INTO tasks (id, title, description, priority, assigned_agent_id, created_by_agent_id, business_id, due_date, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO tasks (id, title, description, priority, assigned_agent_id, created_by_agent_id, workspace_id, business_id, due_date, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         body.title,
@@ -92,6 +99,7 @@ export async function POST(request: NextRequest) {
         body.priority || 'normal',
         body.assigned_agent_id || null,
         body.created_by_agent_id || null,
+        workspaceId,
         body.business_id || 'default',
         body.due_date || null,
         now,

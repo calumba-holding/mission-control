@@ -57,10 +57,10 @@
 - [x] No uncommitted changes
 - [x] Branch up to date
 
-## Deployment on M4
+## Deployment on production server
 
 ### Steps
-1. [ ] SSH into M4
+1. [ ] SSH into production server
 2. [ ] Navigate to project directory
 3. [ ] Pull latest from git (`git pull origin main`)
 4. [ ] Install dependencies (`npm install`)

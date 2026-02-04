@@ -2,7 +2,7 @@
 
 export type AgentStatus = 'standby' | 'working' | 'offline';
 
-export type TaskStatus = 'inbox' | 'assigned' | 'in_progress' | 'testing' | 'review' | 'done';
+export type TaskStatus = 'planning' | 'inbox' | 'assigned' | 'in_progress' | 'testing' | 'review' | 'done';
 
 export type TaskPriority = 'low' | 'normal' | 'high' | 'urgent';
 
@@ -28,6 +28,7 @@ export interface Agent {
   avatar_emoji: string;
   status: AgentStatus;
   is_master: boolean;
+  workspace_id: string;
   soul_md?: string;
   user_md?: string;
   agents_md?: string;
@@ -43,6 +44,7 @@ export interface Task {
   priority: TaskPriority;
   assigned_agent_id?: string;
   created_by_agent_id?: string;
+  workspace_id: string;
   business_id: string;
   due_date?: string;
   created_at: string;
@@ -96,6 +98,34 @@ export interface Business {
   created_at: string;
 }
 
+export interface Workspace {
+  id: string;
+  name: string;
+  slug: string;
+  description?: string;
+  icon: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkspaceStats {
+  id: string;
+  name: string;
+  slug: string;
+  icon: string;
+  taskCounts: {
+    planning: number;
+    inbox: number;
+    assigned: number;
+    in_progress: number;
+    testing: number;
+    review: number;
+    done: number;
+    total: number;
+  };
+  agentCount: number;
+}
+
 export interface OpenClawSession {
   id: string;
   agent_id: string;
@@ -133,6 +163,57 @@ export interface TaskDeliverable {
   path?: string;
   description?: string;
   created_at: string;
+}
+
+// Planning types
+export type PlanningQuestionType = 'multiple_choice' | 'text' | 'yes_no';
+
+export type PlanningCategory = 
+  | 'goal'
+  | 'audience'
+  | 'scope'
+  | 'design'
+  | 'content'
+  | 'technical'
+  | 'timeline'
+  | 'constraints';
+
+export interface PlanningQuestionOption {
+  id: string;
+  label: string;
+}
+
+export interface PlanningQuestion {
+  id: string;
+  task_id: string;
+  category: PlanningCategory;
+  question: string;
+  question_type: PlanningQuestionType;
+  options?: PlanningQuestionOption[];
+  answer?: string;
+  answered_at?: string;
+  sort_order: number;
+  created_at: string;
+}
+
+export interface PlanningSpec {
+  id: string;
+  task_id: string;
+  spec_markdown: string;
+  locked_at: string;
+  locked_by?: string;
+  created_at: string;
+}
+
+export interface PlanningState {
+  questions: PlanningQuestion[];
+  spec?: PlanningSpec;
+  progress: {
+    total: number;
+    answered: number;
+    percentage: number;
+  };
+  isLocked: boolean;
 }
 
 // API request/response types

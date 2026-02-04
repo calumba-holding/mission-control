@@ -7,7 +7,7 @@ All notable changes to Mission Control will be documented in this file.
 ### Added - Cross-Machine Orchestration & Bug Fixes (2026-01-31)
 
 **🌐 Cross-Machine File Delivery**
-- **File Upload API** (`POST /api/files/upload`): Remote agents (e.g., on M1 Mac) can now upload files to Mission Control server (M4 Mac) via HTTP
+- **File Upload API** (`POST /api/files/upload`): Remote agents (e.g., on development machine) can now upload files to Mission Control server (production server Mac) via HTTP
 - Files saved to `$PROJECTS_PATH/{relativePath}`
 - Path traversal security protection
 - Returns full path for deliverable registration
@@ -39,7 +39,7 @@ All notable changes to Mission Control will be documented in this file.
 **📚 Documentation**
 - **HEARTBEAT.md**: Instructions for orchestrating LLMs (Charlie) to call Mission Control APIs
 - **ORCHESTRATION.md**: Updated with all new endpoints and file upload workflow
-- Cross-machine architecture notes (M1 ↔ M4 setup)
+- Cross-machine architecture notes (development machine ↔ production server setup)
 
 **🔧 Type System**
 - Added `task_deleted` SSE event type
