@@ -1,84 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
-import type { PlanningQuestion, PlanningSpec, PlanningState, PlanningCategory } from '@/lib/types';
+import { getOpenClawClient } from '@/lib/openclaw/client';
 
-// Question templates by category
-const QUESTION_TEMPLATES: Record<PlanningCategory, { question: string; options?: string[] }[]> = {
-  goal: [
-    {
-      question: 'What is the primary outcome or goal of this task?',
-      options: ['Generate leads/sales', 'Provide information', 'Collect user data', 'Build brand awareness', 'Other']
-    },
-    {
-      question: 'How will you measure success?',
-      options: ['Conversion rate', 'Page views/traffic', 'Form submissions', 'User engagement', 'Other']
-    }
-  ],
-  audience: [
-    {
-      question: 'Who is the primary target audience?',
-      options: ['B2B professionals', 'B2C consumers', 'Existing customers', 'New prospects', 'Other']
-    },
-    {
-      question: 'What problem does your audience face that this addresses?',
-    }
-  ],
-  scope: [
-    {
-      question: 'What is included in this task?',
-    },
-    {
-      question: 'What is explicitly NOT included (out of scope)?',
-    }
-  ],
-  design: [
-    {
-      question: 'Are there any reference sites or designs to follow?',
-    },
-    {
-      question: 'What is the visual style/tone?',
-      options: ['Professional/Corporate', 'Modern/Minimal', 'Bold/Creative', 'Friendly/Casual', 'Other']
-    },
-    {
-      question: 'Do you have brand colors or assets to use?',
-      options: ['Yes, I will provide them', 'No, use your best judgment', 'Use existing brand from website', 'Other']
-    }
-  ],
-  content: [
-    {
-      question: 'Do you have the content/copy ready?',
-      options: ['Yes, I will provide it', 'No, please write it', 'I have rough notes to expand', 'Other']
-    },
-    {
-      question: 'Are there specific messages or points that must be included?',
-    }
-  ],
-  technical: [
-    {
-      question: 'What technology/platform should be used?',
-      options: ['Static HTML/CSS', 'React/Next.js', 'WordPress', 'No preference', 'Other']
-    },
-    {
-      question: 'Are there any integrations needed?',
-      options: ['Form submission to email', 'CRM integration', 'Analytics tracking', 'None needed', 'Other']
-    }
-  ],
-  timeline: [
-    {
-      question: 'When do you need this completed?',
-      options: ['ASAP (within 24 hours)', 'This week', 'Next week', 'No rush', 'Specific date']
-    }
-  ],
-  constraints: [
-    {
-      question: 'Are there any specific constraints or requirements?',
-    },
-    {
-      question: 'Is there a budget or resource limit?',
-      options: ['No budget limit', 'Keep it simple/minimal', 'Medium complexity okay', 'Other']
-    }
-  ]
-};
+// Planning session prefix for OpenClaw
+const PLANNING_SESSION_PREFIX = 'planning:';
 
 // GET /api/tasks/[id]/planning - Get planning state
 export async function GET(
@@ -89,50 +14,58 @@ export async function GET(
 
   try {
     // Get task
-    const task = getDb().prepare('SELECT * FROM tasks WHERE id = ?').get(taskId);
+    const task = getDb().prepare('SELECT * FROM tasks WHERE id = ?').get(taskId) as {
+      id: string;
+      title: string;
+      description: string;
+      status: string;
+      planning_session_key?: string;
+      planning_messages?: string;
+      planning_complete?: number;
+      planning_spec?: string;
+      planning_agents?: string;
+    } | undefined;
+    
     if (!task) {
       return NextResponse.json({ error: 'Task not found' }, { status: 404 });
     }
 
-    // Get questions
-    const questions = getDb().prepare(
-      'SELECT * FROM planning_questions WHERE task_id = ? ORDER BY sort_order'
-    ).all(taskId) as PlanningQuestion[];
+    // Parse planning messages from JSON
+    const messages = task.planning_messages ? JSON.parse(task.planning_messages) : [];
+    
+    // Find the latest question (last assistant message with question structure)
+    const lastAssistantMessage = [...messages].reverse().find((m: { role: string }) => m.role === 'assistant');
+    let currentQuestion = null;
+    
+    if (lastAssistantMessage) {
+      try {
+        // Try to parse as structured planning response
+        const parsed = JSON.parse(lastAssistantMessage.content);
+        if (parsed.question) {
+          currentQuestion = parsed;
+        }
+      } catch {
+        // Not JSON, might be a plain message
+      }
+    }
 
-    // Parse options JSON for each question
-    const parsedQuestions = questions.map(q => ({
-      ...q,
-      options: q.options ? JSON.parse(q.options as unknown as string) : undefined
-    }));
-
-    // Get spec if exists
-    const spec = getDb().prepare(
-      'SELECT * FROM planning_specs WHERE task_id = ?'
-    ).get(taskId) as PlanningSpec | undefined;
-
-    // Calculate progress
-    const answered = parsedQuestions.filter(q => q.answer).length;
-    const total = parsedQuestions.length;
-
-    const state: PlanningState = {
-      questions: parsedQuestions,
-      spec,
-      progress: {
-        total,
-        answered,
-        percentage: total > 0 ? Math.round((answered / total) * 100) : 0
-      },
-      isLocked: !!spec
-    };
-
-    return NextResponse.json(state);
+    return NextResponse.json({
+      taskId,
+      sessionKey: task.planning_session_key,
+      messages,
+      currentQuestion,
+      isComplete: !!task.planning_complete,
+      spec: task.planning_spec ? JSON.parse(task.planning_spec) : null,
+      agents: task.planning_agents ? JSON.parse(task.planning_agents) : null,
+      isStarted: messages.length > 0,
+    });
   } catch (error) {
     console.error('Failed to get planning state:', error);
     return NextResponse.json({ error: 'Failed to get planning state' }, { status: 500 });
   }
 }
 
-// POST /api/tasks/[id]/planning - Generate questions for a task
+// POST /api/tasks/[id]/planning - Start planning session
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -141,68 +74,137 @@ export async function POST(
 
   try {
     // Get task
-    const task = getDb().prepare('SELECT * FROM tasks WHERE id = ?').get(taskId) as { id: string; status: string } | undefined;
+    const task = getDb().prepare('SELECT * FROM tasks WHERE id = ?').get(taskId) as {
+      id: string;
+      title: string;
+      description: string;
+      status: string;
+      planning_session_key?: string;
+      planning_messages?: string;
+    } | undefined;
+    
     if (!task) {
       return NextResponse.json({ error: 'Task not found' }, { status: 404 });
     }
 
-    // Check if questions already exist
-    const existingQuestions = getDb().prepare(
-      'SELECT COUNT(*) as count FROM planning_questions WHERE task_id = ?'
-    ).get(taskId) as { count: number };
-
-    if (existingQuestions.count > 0) {
-      return NextResponse.json({ error: 'Questions already generated' }, { status: 400 });
+    // Check if planning already started
+    if (task.planning_session_key) {
+      return NextResponse.json({ error: 'Planning already started', sessionKey: task.planning_session_key }, { status: 400 });
     }
 
-    // Update task status to planning
-    getDb().prepare('UPDATE tasks SET status = ? WHERE id = ?').run('planning', taskId);
+    // Create session key for this planning task
+    const sessionKey = `${PLANNING_SESSION_PREFIX}${taskId}`;
 
-    // Generate questions from templates
-    const insertQuestion = getDb().prepare(`
-      INSERT INTO planning_questions (id, task_id, category, question, question_type, options, sort_order)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `);
+    // Build the initial planning prompt
+    const planningPrompt = `PLANNING REQUEST
 
-    let sortOrder = 0;
-    const categories: PlanningCategory[] = ['goal', 'audience', 'scope', 'design', 'content', 'technical', 'timeline', 'constraints'];
+Task Title: ${task.title}
+Task Description: ${task.description || 'No description provided'}
 
-    for (const category of categories) {
-      const templates = QUESTION_TEMPLATES[category];
-      for (const template of templates) {
-        const id = crypto.randomUUID();
-        const questionType = template.options ? 'multiple_choice' : 'text';
-        const options = template.options 
-          ? JSON.stringify(template.options.map((label, idx) => ({ id: String.fromCharCode(65 + idx), label })))
-          : null;
+You are starting a planning session for this task. Read PLANNING.md for your protocol.
 
-        insertQuestion.run(id, taskId, category, template.question, questionType, options, sortOrder++);
+Generate your FIRST question to understand what the user needs. Remember:
+- Questions must be multiple choice
+- Include an "Other" option
+- Be specific to THIS task, not generic
+
+Respond with ONLY valid JSON in this format:
+{
+  "question": "Your question here?",
+  "options": [
+    {"id": "A", "label": "First option"},
+    {"id": "B", "label": "Second option"},
+    {"id": "C", "label": "Third option"},
+    {"id": "other", "label": "Other"}
+  ]
+}`;
+
+    // Connect to OpenClaw and send the planning request
+    const client = getOpenClawClient();
+    if (!client.isConnected()) {
+      await client.connect();
+    }
+
+    // Send planning request to the main session with a special marker
+    // The message will be processed by Charlie who will respond with questions
+    await client.call('chat.send', {
+      sessionKey: sessionKey,
+      message: planningPrompt,
+    });
+
+    // Store the session key and initial message
+    const messages = [{ role: 'user', content: planningPrompt, timestamp: Date.now() }];
+    
+    getDb().prepare(`
+      UPDATE tasks 
+      SET planning_session_key = ?, planning_messages = ?, status = 'planning'
+      WHERE id = ?
+    `).run(sessionKey, JSON.stringify(messages), taskId);
+
+    // Poll for response (give OpenClaw time to process)
+    // In production, this would be better handled with webhooks or SSE
+    let response = null;
+    for (let i = 0; i < 30; i++) { // Poll for up to 30 seconds
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      try {
+        const history = await client.call<{ messages: Array<{ role: string; content: string }> }>('chat.history', {
+          sessionKey: sessionKey,
+          limit: 10,
+        });
+        
+        if (history && history.messages) {
+          const assistantMessage = history.messages.find((m: { role: string }) => m.role === 'assistant');
+          if (assistantMessage) {
+            response = assistantMessage.content;
+            break;
+          }
+        }
+      } catch (err) {
+        console.log('Polling for response...', err);
       }
     }
 
-    // Return the new planning state
-    const questions = getDb().prepare(
-      'SELECT * FROM planning_questions WHERE task_id = ? ORDER BY sort_order'
-    ).all(taskId) as PlanningQuestion[];
+    if (response) {
+      // Parse and store the response
+      try {
+        const parsed = JSON.parse(response);
+        messages.push({ role: 'assistant', content: response, timestamp: Date.now() });
+        
+        getDb().prepare(`
+          UPDATE tasks SET planning_messages = ? WHERE id = ?
+        `).run(JSON.stringify(messages), taskId);
 
-    const parsedQuestions = questions.map(q => ({
-      ...q,
-      options: q.options ? JSON.parse(q.options as unknown as string) : undefined
-    }));
+        return NextResponse.json({
+          success: true,
+          sessionKey,
+          currentQuestion: parsed,
+          messages,
+        });
+      } catch {
+        // Response wasn't valid JSON, store it anyway
+        messages.push({ role: 'assistant', content: response, timestamp: Date.now() });
+        getDb().prepare(`
+          UPDATE tasks SET planning_messages = ? WHERE id = ?
+        `).run(JSON.stringify(messages), taskId);
 
-    const state: PlanningState = {
-      questions: parsedQuestions,
-      progress: {
-        total: parsedQuestions.length,
-        answered: 0,
-        percentage: 0
-      },
-      isLocked: false
-    };
+        return NextResponse.json({
+          success: true,
+          sessionKey,
+          rawResponse: response,
+          messages,
+        });
+      }
+    }
 
-    return NextResponse.json(state);
+    return NextResponse.json({
+      success: true,
+      sessionKey,
+      messages,
+      note: 'Planning started, waiting for response. Poll GET endpoint for updates.',
+    });
   } catch (error) {
-    console.error('Failed to generate questions:', error);
-    return NextResponse.json({ error: 'Failed to generate questions' }, { status: 500 });
+    console.error('Failed to start planning:', error);
+    return NextResponse.json({ error: 'Failed to start planning: ' + (error as Error).message }, { status: 500 });
   }
 }
