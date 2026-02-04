@@ -1,425 +1,410 @@
-# Mission Control 🦞
+# Mission Control 🎮
 
-AI Agent Orchestration Dashboard for OpenClaw.
+**AI Agent Orchestration Dashboard**
 
-![Mission Control](docs/images/mission_control.png)
+Mission Control is a task management system that lets you create tasks, plan them through an AI-guided Q&A process, and automatically dispatch them to AI agents for execution. Think of it as a project manager for AI workers.
 
-## Features
+![Mission Control](https://img.shields.io/badge/Status-Beta-yellow) ![Next.js](https://img.shields.io/badge/Next.js-15-black) ![License](https://img.shields.io/badge/License-MIT-blue)
 
-- **Agent Management**: Create, configure, and monitor AI agents with custom personalities (SOUL.md, USER.md, AGENTS.md)
-- **Mission Queue**: Kanban-style task board with drag-and-drop (INBOX → ASSIGNED → IN PROGRESS → REVIEW → DONE)
-- **Automated Task Dispatch**: Tasks automatically route to agents' OpenClaw sessions when assigned
-- **Completion Detection**: Agents report completion via TASK_COMPLETE message, auto-moves to review
-- **Quality Control**: Only master agent (Charlie) can approve tasks from review to done
-- **Agent Chat**: Real-time agent-to-agent conversations - watch your team collaborate
-- **Live Feed**: Real-time event stream showing all activity
-- **OpenClaw Integration**: Connects to your local OpenClaw Gateway
+---
 
-## How It Works
+## 🎯 What Does It Do?
 
-### The Automated Workflow
+1. **Create Tasks** - Add tasks with a title and description
+2. **AI Planning** - An AI asks you clarifying questions to understand exactly what you need
+3. **Agent Creation** - Based on your answers, the AI creates a specialized agent for the job
+4. **Auto-Dispatch** - The task is automatically sent to the agent
+5. **Execution** - The agent works on your task (browses web, writes code, creates files, etc.)
+6. **Delivery** - Completed work is delivered back to Mission Control
 
-1. **You assign a task** → Drag task to agent in ASSIGNED column
-2. **System auto-dispatches** → Task details sent to agent's OpenClaw session
-3. **Agent works** → Task moves to IN PROGRESS, agent status becomes "working"
-4. **Agent completes** → Agent replies `TASK_COMPLETE: [summary]`
-5. **Auto-review** → Task moves to REVIEW, agent returns to "standby"
-6. **Charlie approves** → Master agent reviews work, moves to DONE
+---
 
-### Agent Protocol
+## 🏗️ Architecture Overview
 
-Agents receive tasks like this:
 ```
-🔵 **NEW TASK ASSIGNED**
-
-**Title:** Build authentication system
-**Priority:** HIGH
-**Task ID:** abc-123
-
-Please work on this task. When complete, reply with:
-`TASK_COMPLETE: [brief summary of what you did]`
+┌─────────────────────────────────────────────────────────────────┐
+│                        YOUR COMPUTER                            │
+│                                                                 │
+│  ┌─────────────────┐         ┌─────────────────────────────┐   │
+│  │ Mission Control │ ◄─────► │     OpenClaw Gateway        │   │
+│  │   (Next.js)     │   WS    │  (AI Agent Runtime)         │   │
+│  │   Port 3000     │         │  Port 18789                 │   │
+│  └─────────────────┘         └─────────────────────────────┘   │
+│         │                              │                        │
+│         ▼                              ▼                        │
+│  ┌─────────────┐              ┌─────────────────┐              │
+│  │   SQLite    │              │   AI Provider   │              │
+│  │  Database   │              │ (Anthropic/etc) │              │
+│  └─────────────┘              └─────────────────┘              │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-See [Agent Protocol Documentation](docs/AGENT_PROTOCOL.md) for full details.
+**Mission Control** = The dashboard you interact with (this project)  
+**OpenClaw Gateway** = The AI runtime that actually executes tasks (separate project)
 
-## Quick Start
+---
 
-### Prerequisites
+## 📋 Prerequisites
 
-- Node.js 20+
-- OpenClaw running locally (`openclaw gateway start`)
-- npm or pnpm
+Before you start, you need:
 
-### 5-Minute Setup
+### 1. Node.js (v18 or higher)
+Check if you have it:
+```bash
+node --version
+```
+If not, download from: https://nodejs.org/
+
+### 2. OpenClaw Gateway
+Mission Control needs OpenClaw to run AI agents. You have two options:
+
+**Option A: Install OpenClaw (Recommended)**
+```bash
+npm install -g openclaw
+```
+
+**Option B: Use an existing OpenClaw instance**
+If someone else is running OpenClaw on your network, you just need the URL and token.
+
+### 3. An AI API Key
+OpenClaw needs access to an AI provider. Supported providers:
+- **Anthropic** (Claude) - Recommended
+- **OpenAI** (GPT-4)
+- **Google** (Gemini)
+- Others via OpenRouter
+
+---
+
+## 🚀 Installation
+
+### Step 1: Clone the Repository
 
 ```bash
-# Clone the repository
-git clone https://github.com/yourusername/mission-control.git
+git clone https://github.com/crshdn/mission-control.git
 cd mission-control
+```
 
-# Install dependencies
+### Step 2: Install Dependencies
+
+```bash
 npm install
+```
 
-# Configure environment
-cp .env.example .env.local
-# Edit .env.local with your paths and settings
+### Step 3: Create Environment File
 
-# Initialize database
-npm run db:seed
+Create a file called `.env.local` in the project root:
 
-# Start development server
+```bash
+touch .env.local
+```
+
+Open it in a text editor and add:
+
+```env
+# OpenClaw Gateway Connection
+OPENCLAW_GATEWAY_URL=ws://127.0.0.1:18789
+OPENCLAW_GATEWAY_TOKEN=your-openclaw-token-here
+
+# Optional: Custom port for Mission Control
+PORT=3000
+```
+
+**How to get these values:**
+
+| Variable | Where to find it |
+|----------|------------------|
+| `OPENCLAW_GATEWAY_URL` | The WebSocket URL where OpenClaw is running. Default is `ws://127.0.0.1:18789` for local. For remote, use `wss://your-server.example.com` |
+| `OPENCLAW_GATEWAY_TOKEN` | Found in your OpenClaw config file at `~/.openclaw/openclaw.json` under `gateway.token` |
+
+### Step 4: Start OpenClaw (if not already running)
+
+In a **separate terminal**:
+
+```bash
+# First time setup - this will guide you through configuration
+openclaw init
+
+# Start the gateway
+openclaw gateway start
+```
+
+OpenClaw will ask you to configure your AI provider (like Anthropic). Follow the prompts.
+
+### Step 5: Start Mission Control
+
+Back in the Mission Control directory:
+
+```bash
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) to see Mission Control.
+You should see:
+```
+▲ Next.js 15.x.x
+- Local: http://localhost:3000
+```
 
-### Configuration
+### Step 6: Open in Browser
 
-Mission Control supports **two configuration methods**:
+Go to: **http://localhost:3000**
 
-1. **Environment Variables** (`.env.local`) - Server-side config, best for deployments
-2. **Settings UI** - User preferences via web interface (Settings → gear icon)
+🎉 You should see the Mission Control dashboard!
 
-**📖 For complete setup instructions, see [Production Setup Guide](PRODUCTION_SETUP.md)**
+---
 
-### Key Environment Variables
+## 📖 How to Use
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `WORKSPACE_BASE_PATH` | `~/Documents/Shared` | Base directory for workspace |
-| `PROJECTS_PATH` | `~/Documents/Shared/projects` | Project folders location |
-| `MISSION_CONTROL_URL` | Auto-detected | API URL for orchestration |
-| `OPENCLAW_GATEWAY_URL` | `ws://127.0.0.1:18789` | Gateway WebSocket URL |
-| `OPENCLAW_GATEWAY_TOKEN` | (empty) | Auth token (required for remote) |
-| `DATABASE_PATH` | `./mission-control.db` | SQLite database path |
+### Creating Your First Task
 
-**⚠️ Security:** Never commit `.env.local`! It's gitignored by default.
+1. Click the **"+ New Task"** button
+2. Enter a title (e.g., "Research best coffee machines under $200")
+3. Add a description with any details
+4. Click **Create**
 
-## Architecture
+### The Planning Process
+
+1. Your task appears in the **PLANNING** column
+2. Click on it to start planning
+3. An AI will ask you questions to understand exactly what you need:
+   - What's the goal?
+   - Who's the audience?
+   - Any constraints?
+4. Answer each question by selecting an option or typing your own
+5. When planning is complete, an agent is automatically created and assigned
+
+### Watching Your Agent Work
+
+1. The task moves to **IN PROGRESS**
+2. The agent starts working (you might see browser windows open, files being created, etc.)
+3. When done, the task moves to **REVIEW**
+4. Check the deliverables and mark as **DONE**
+
+### Task Workflow
+
+```
+PLANNING → INBOX → ASSIGNED → IN PROGRESS → TESTING → REVIEW → DONE
+```
+
+You can drag tasks between columns manually, or let the system auto-advance them.
+
+---
+
+## ⚙️ Configuration
+
+### Environment Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `OPENCLAW_GATEWAY_URL` | Yes | `ws://127.0.0.1:18789` | WebSocket URL to OpenClaw Gateway |
+| `OPENCLAW_GATEWAY_TOKEN` | Yes | - | Authentication token for OpenClaw |
+| `PORT` | No | `3000` | Port for Mission Control web server |
+
+### OpenClaw Configuration
+
+Your OpenClaw config lives at `~/.openclaw/openclaw.json`. Key settings:
+
+```json
+{
+  "gateway": {
+    "mode": "local",
+    "token": "your-secret-token"
+  },
+  "providers": {
+    "anthropic": {
+      "apiKey": "${ANTHROPIC_API_KEY}"
+    }
+  },
+  "defaultModel": "anthropic/claude-sonnet-4-5"
+}
+```
+
+**Important:** Store API keys in `~/.openclaw/.env`, not directly in the config:
+
+```env
+# ~/.openclaw/.env
+ANTHROPIC_API_KEY=sk-ant-xxxxx
+```
+
+---
+
+## 🌐 Multi-Machine Setup
+
+You can run Mission Control and OpenClaw on different computers.
+
+### Example: Mission Control on Computer A, OpenClaw on Computer B
+
+**On Computer B (OpenClaw):**
+
+1. Configure OpenClaw to accept remote connections:
+```json
+{
+  "gateway": {
+    "mode": "local",
+    "token": "your-secret-token"
+  }
+}
+```
+
+2. Make sure port 18789 is accessible (firewall, etc.)
+
+3. Start OpenClaw:
+```bash
+openclaw gateway start
+```
+
+**On Computer A (Mission Control):**
+
+1. Set the remote URL in `.env.local`:
+```env
+OPENCLAW_GATEWAY_URL=ws://192.168.1.100:18789
+OPENCLAW_GATEWAY_TOKEN=your-secret-token
+```
+
+Replace `192.168.1.100` with Computer B's IP address.
+
+### Using Tailscale (Recommended for Remote)
+
+If your machines are on different networks, use [Tailscale](https://tailscale.com/) for secure connections:
+
+```env
+OPENCLAW_GATEWAY_URL=wss://your-machine-name.tailnet-name.ts.net
+OPENCLAW_GATEWAY_TOKEN=your-secret-token
+```
+
+---
+
+## 🗄️ Database
+
+Mission Control uses SQLite for storage. The database file is automatically created at:
+
+```
+./mission-control.db
+```
+
+### Resetting the Database
+
+To start fresh, simply delete the database file:
+
+```bash
+rm mission-control.db
+```
+
+It will be recreated on next startup.
+
+### Viewing the Database
+
+You can use any SQLite viewer, or the command line:
+
+```bash
+sqlite3 mission-control.db
+.tables
+SELECT * FROM tasks;
+```
+
+---
+
+## 🔧 Troubleshooting
+
+### "Failed to connect to OpenClaw Gateway"
+
+**Cause:** Mission Control can't reach OpenClaw.
+
+**Solutions:**
+1. Make sure OpenClaw is running: `openclaw gateway status`
+2. Check the URL in `.env.local` is correct
+3. Verify the token matches OpenClaw's config
+4. Check firewall isn't blocking port 18789
+
+### "Planning questions not loading"
+
+**Cause:** The AI response is slow or failed.
+
+**Solutions:**
+1. Check OpenClaw logs: `openclaw gateway logs`
+2. Verify your AI API key is valid
+3. Try refreshing and clicking the task again
+
+### "Agent not working on task"
+
+**Cause:** Dispatch may have failed.
+
+**Solutions:**
+1. Check the Events panel in Mission Control
+2. Look for errors in the browser console (F12)
+3. Check OpenClaw logs for errors
+
+### Port Already in Use
+
+```bash
+# Find what's using port 3000
+lsof -i :3000
+
+# Kill it (replace PID with the actual number)
+kill -9 PID
+
+# Or use a different port
+PORT=3001 npm run dev
+```
+
+---
+
+## 📁 Project Structure
 
 ```
 mission-control/
 ├── src/
-│   ├── app/                    # Next.js App Router
-│   │   ├── api/               # API routes
-│   │   │   ├── agents/        # Agent CRUD
-│   │   │   ├── tasks/         # Task CRUD
-│   │   │   ├── conversations/ # Chat/conversations
-│   │   │   ├── events/        # Live feed events
-│   │   │   └── openclaw/      # OpenClaw integration
-│   │   ├── layout.tsx
-│   │   └── page.tsx           # Main dashboard
-│   ├── components/            # React components
-│   │   ├── Header.tsx
-│   │   ├── AgentsSidebar.tsx
-│   │   ├── AgentModal.tsx
-│   │   ├── MissionQueue.tsx
-│   │   ├── TaskModal.tsx
-│   │   ├── ChatPanel.tsx
-│   │   └── LiveFeed.tsx
-│   └── lib/
-│       ├── db/                # SQLite database
-│       ├── openclaw/          # OpenClaw client
-│       ├── store.ts           # Zustand state
-│       └── types.ts           # TypeScript types
-├── mission-control.db         # SQLite database (created on seed)
-└── package.json
+│   ├── app/                 # Next.js pages and API routes
+│   │   ├── api/            # Backend API endpoints
+│   │   │   ├── tasks/      # Task CRUD operations
+│   │   │   ├── agents/     # Agent management
+│   │   │   └── openclaw/   # OpenClaw proxy endpoints
+│   │   └── page.tsx        # Main dashboard page
+│   ├── components/         # React components
+│   │   ├── MissionQueue.tsx    # Kanban board
+│   │   ├── TaskModal.tsx       # Task create/edit modal
+│   │   └── ...
+│   └── lib/                # Utilities and core logic
+│       ├── db/             # Database setup and queries
+│       ├── openclaw/       # OpenClaw client
+│       └── store.ts        # State management
+├── .env.local              # Your environment config (create this)
+├── package.json
+└── README.md
 ```
 
-## Agent Personalities
+---
 
-Each agent can have three markdown files defining their personality:
+## 🤝 Contributing
 
-### SOUL.md
-Defines the agent's core identity, personality traits, and communication style.
+Contributions are welcome! Please:
 
-### USER.md
-Context about the human(s) the agent works with - preferences, communication style, goals.
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature/amazing-feature`
+3. Commit your changes: `git commit -m 'Add amazing feature'`
+4. Push to the branch: `git push origin feature/amazing-feature`
+5. Open a Pull Request
 
-### AGENTS.md
-Awareness of other agents in the system - who they are, how to collaborate.
+---
 
-## API Endpoints
+## 📜 License
 
-### Agents
-- `GET /api/agents` - List all agents
-- `POST /api/agents` - Create agent
-- `GET /api/agents/[id]` - Get agent
-- `PATCH /api/agents/[id]` - Update agent
-- `DELETE /api/agents/[id]` - Delete agent
+MIT License - see [LICENSE](LICENSE) for details.
 
-### Tasks
-- `GET /api/tasks` - List tasks (with filters)
-- `POST /api/tasks` - Create task
-- `GET /api/tasks/[id]` - Get task
-- `PATCH /api/tasks/[id]` - Update task
-- `DELETE /api/tasks/[id]` - Delete task
+---
 
-### Conversations
-- `GET /api/conversations` - List conversations
-- `POST /api/conversations` - Create conversation
-- `GET /api/conversations/[id]/messages` - Get messages
-- `POST /api/conversations/[id]/messages` - Send message
+## 🙏 Acknowledgments
 
-### Events
-- `GET /api/events` - List events (live feed)
-- `POST /api/events` - Create event
+- Built with [Next.js](https://nextjs.org/)
+- Powered by [OpenClaw](https://github.com/openclaw/openclaw)
+- AI by [Anthropic](https://anthropic.com/), [OpenAI](https://openai.com/), and others
 
-### OpenClaw
-- `GET /api/openclaw/status` - Check Gateway connection status
-- `GET /api/openclaw/sessions` - List OpenClaw sessions
-- `POST /api/openclaw/sessions` - Create session
-- `GET /api/openclaw/sessions/[id]` - Get session details
-- `POST /api/openclaw/sessions/[id]` - Send message to session
-- `GET /api/openclaw/sessions/[id]/history` - Get session history
-- `PATCH /api/openclaw/sessions/[id]` - Update session (mark complete)
-- `DELETE /api/openclaw/sessions/[id]` - Delete a session
+---
 
-### Agent ↔ OpenClaw Linking
-- `GET /api/agents/[id]/openclaw` - Get agent's OpenClaw session
-- `POST /api/agents/[id]/openclaw` - Link agent to OpenClaw
-- `DELETE /api/agents/[id]/openclaw` - Unlink agent from OpenClaw
+## 💬 Support
 
-### Task Activities & Deliverables
-- `GET /api/tasks/[id]/activities` - List task activities
-- `POST /api/tasks/[id]/activities` - Log activity
-- `GET /api/tasks/[id]/deliverables` - List deliverables
-- `POST /api/tasks/[id]/deliverables` - Add deliverable
-- `GET /api/tasks/[id]/subagent` - List sub-agents
-- `POST /api/tasks/[id]/subagent` - Register sub-agent
+- **Issues:** [GitHub Issues](https://github.com/crshdn/mission-control/issues)
+- **Discussions:** [GitHub Discussions](https://github.com/crshdn/mission-control/discussions)
 
-### Files (for remote agents)
-- `POST /api/files/upload` - Upload file from remote agent
-- `GET /api/files/upload` - Get upload endpoint info
-- `POST /api/files/reveal` - Open file in Finder
-- `GET /api/files/preview` - Preview HTML file
+---
 
-### Webhooks
-- `POST /api/webhooks/agent-completion` - Agent completion notification
-
-## OpenClaw WebSocket Protocol
-
-Mission Control connects to OpenClaw Gateway via WebSocket. The protocol uses **RequestFrame format** (not JSON-RPC).
-
-### Prerequisites
-
-1. **OpenClaw Gateway running** on your local machine or accessible via network
-2. **Authentication token** - Generate one with:
-   ```bash
-   openssl rand -hex 32
-   ```
-3. **Configure your Gateway** to accept the token (see OpenClaw docs)
-
-### Remote Access via Tailscale
-
-To connect from another machine:
-
-1. Install [Tailscale](https://tailscale.com) on both machines
-2. On the Gateway machine, expose the port:
-   ```bash
-   tailscale serve --bg 18789
-   ```
-3. Use the Tailscale URL in your `.env.local`:
-   ```bash
-   OPENCLAW_GATEWAY_URL=wss://your-machine.tail12345.ts.net
-   OPENCLAW_GATEWAY_TOKEN=your-64-char-hex-token
-   ```
-
-### Connection Flow
-
-```
-1. WebSocket Connect
-   Client → Gateway: wss://gateway?token=xxx
-
-2. Challenge (Gateway initiates)
-   Gateway → Client: {
-     "type": "event",
-     "event": "connect.challenge",
-     "payload": { "nonce": "uuid", "ts": 1234567890 }
-   }
-
-3. Connect Response (Client authenticates)
-   Client → Gateway: {
-     "type": "req",
-     "id": "uuid",
-     "method": "connect",
-     "params": {
-       "minProtocol": 3,
-       "maxProtocol": 3,
-       "client": { "id": "gateway-client", "version": "1.0.0", "platform": "web", "mode": "ui" },
-       "auth": { "token": "xxx" }
-     }
-   }
-
-4. Hello OK (Connection established)
-   Gateway → Client: {
-     "type": "res",
-     "id": "uuid",
-     "ok": true,
-     "payload": { "type": "hello-ok", "protocol": 3, ... }
-   }
-```
-
-### RequestFrame Format
-
-All requests after connection use this format:
-
-```typescript
-// Request
-{
-  type: "req",
-  id: crypto.randomUUID(),  // Unique ID for matching responses
-  method: "sessions.list",   // Method name
-  params: { ... }            // Method-specific parameters
-}
-
-// Success Response
-{
-  type: "res",
-  id: "matching-request-id",
-  ok: true,
-  payload: { ... }
-}
-
-// Error Response
-{
-  type: "res",
-  id: "matching-request-id",
-  ok: false,
-  error: { code: "ERROR_CODE", message: "Description" }
-}
-```
-
-### Available Session Methods
-
-| Method | Description |
-|--------|-------------|
-| `sessions.list` | List all sessions |
-| `sessions.preview` | Preview session content |
-| `sessions.patch` | Update session |
-| `sessions.reset` | Reset session state |
-| `sessions.delete` | Delete session |
-| `sessions.compact` | Compact session history |
-
-> **Note**: There is no `sessions.create` method. Sessions are created automatically when you send messages.
-
-### Troubleshooting
-
-| Error | Cause | Fix |
-|-------|-------|-----|
-| `invalid request frame` | Wrong message format | Use `type: "req"` not `jsonrpc: "2.0"` |
-| `invalid request frame` | Sent message before challenge | Wait for `connect.challenge` event first |
-| `protocol version mismatch` | Wrong protocol version | Use `minProtocol: 3, maxProtocol: 3` |
-| `device identity required` | Missing auth token | Include token in both URL query AND `params.auth` |
-| `invalid mode` | Wrong client mode | Use `mode: "ui"` (not `dashboard`) |
-| `WebSocket error` (no connect) | Gateway not running | Start OpenClaw Gateway first |
-| `WebSocket error` (remote) | Tailscale not connected | Check `tailscale status` on both machines |
-
-### What Doesn't Work
-
-These approaches were tried and **do not work**:
-
-- ❌ JSON-RPC format (`jsonrpc: "2.0"`) - Gateway expects RequestFrame
-- ❌ `auth.login` method - Use `connect` method instead
-- ❌ Sending `connect` immediately on open - Must wait for challenge first
-- ❌ Token only in URL - Must also include in `params.auth`
-- ❌ Token only in params - Must also include in URL query string
-- ❌ `mode: "dashboard"` - Use `mode: "ui"` instead
-- ❌ Protocol version 1 - Use version 3
-
-### Valid Client Identifiers
-
-| client.id | client.mode |
-|-----------|-------------|
-| `gateway-client` | `ui` |
-| `webchat-ui` | `webchat` |
-| `cli` | `cli` |
-| `clawdbot-control-ui` | `ui` |
-
-## Cross-Machine Orchestration
-
-Mission Control supports orchestration across multiple machines. For example:
-- **Mission Control** runs on your server
-- **Charlie** (orchestrating LLM) runs on a different machine
-
-### How It Works
-
-Since the orchestrator can't directly write to the server's filesystem, use the **File Upload API**:
-
-```bash
-# 1. Upload file content via HTTP
-curl -X POST http://YOUR_SERVER_IP:3000/api/files/upload \
-  -H "Content-Type: application/json" \
-  -d '{
-    "relativePath": "project-name/index.html",
-    "content": "<!DOCTYPE html>..."
-  }'
-
-# Response: {"path": "$PROJECTS_PATH/project-name/index.html", ...}
-
-# 2. Register the deliverable using the returned path
-curl -X POST http://YOUR_SERVER_IP:3000/api/tasks/{TASK_ID}/deliverables \
-  -H "Content-Type: application/json" \
-  -d '{
-    "deliverable_type": "file",
-    "title": "Homepage",
-    "path": "$PROJECTS_PATH/project-name/index.html"
-  }'
-```
-
-See `HEARTBEAT.md` for full orchestration instructions that can be injected into your LLM's context.
-
-## Charlie - The Master Orchestrator 🦞
-
-Charlie is the default master agent who coordinates all other agents. Charlie:
-
-- Receives and triages incoming tasks
-- Assigns work to appropriate agents
-- Facilitates team collaboration
-- Monitors progress and quality
-- Reports to the human
-
-## Development
-
-```bash
-# Run development server with hot reload
-npm run dev
-
-# Build for production
-npm run build
-
-# Start production server
-npm start
-
-# Run database migrations
-npm run db:migrate
-
-# Seed database with sample data
-npm run db:seed
-
-# Backup current database state
-npm run db:backup
-
-# Restore database from backup
-npm run db:restore
-
-# Full reset (delete + reseed)
-npm run db:reset
-
-# Lint code
-npm run lint
-```
-
-## Tech Stack
-
-- **Framework**: Next.js 14 (App Router)
-- **Language**: TypeScript
-- **Styling**: Tailwind CSS
-- **Database**: SQLite (better-sqlite3)
-- **State**: Zustand
-- **Drag & Drop**: @hello-pangea/dnd
-- **Icons**: Lucide React
-
-## License
-
-MIT
+**Happy orchestrating!** 🚀
