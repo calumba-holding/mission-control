@@ -2,7 +2,7 @@
 
 export type AgentStatus = 'standby' | 'working' | 'offline';
 
-export type TaskStatus = 'pending_dispatch' | 'planning' | 'inbox' | 'assigned' | 'in_progress' | 'convoy_active' | 'testing' | 'review' | 'verification' | 'done';
+export type TaskStatus = 'pending_dispatch' | 'planning' | 'inbox' | 'assigned' | 'in_progress' | 'convoy_active' | 'testing' | 'review' | 'verification' | 'review_fix' | 'done';
 
 export type TaskPriority = 'low' | 'normal' | 'high' | 'urgent';
 
@@ -95,6 +95,8 @@ export interface Task {
   merge_status?: 'pending' | 'merged' | 'conflict' | 'pr_created' | 'abandoned';
   merge_pr_url?: string;
   browser_test_url?: string;
+  review_fix_count?: number;
+  review_fix_max?: number;
   created_at: string;
   updated_at: string;
   // Joined fields
@@ -176,6 +178,7 @@ export interface WorkspaceStats {
     convoy_active: number;
     testing: number;
     review: number;
+    review_fix: number;
     verification: number;
     done: number;
     total: number;
@@ -496,6 +499,7 @@ export interface Product {
   health_weight_config?: string; // JSON: HealthWeightConfig
   batch_review_threshold?: number;
   browser_test_enabled?: number;
+  auto_fix_pr_reviews?: number;
   created_at: string;
   updated_at: string;
 }

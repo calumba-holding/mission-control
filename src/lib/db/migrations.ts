@@ -1740,6 +1740,28 @@ const migrations: Migration[] = [
 
       console.log('[Migration 034] browser_test_enabled (products) and browser_test_url (tasks) added');
     }
+  },
+  {
+    id: '035',
+    name: 'add_pr_review_autofix',
+    up: (db) => {
+      console.log('[Migration 035] Adding PR review auto-fix columns...');
+
+      const tasksInfo = db.prepare("PRAGMA table_info(tasks)").all() as { name: string }[];
+      if (!tasksInfo.some(col => col.name === 'review_fix_count')) {
+        db.exec(`ALTER TABLE tasks ADD COLUMN review_fix_count INTEGER DEFAULT 0`);
+      }
+      if (!tasksInfo.some(col => col.name === 'review_fix_max')) {
+        db.exec(`ALTER TABLE tasks ADD COLUMN review_fix_max INTEGER DEFAULT 3`);
+      }
+
+      const productsInfo = db.prepare("PRAGMA table_info(products)").all() as { name: string }[];
+      if (!productsInfo.some(col => col.name === 'auto_fix_pr_reviews')) {
+        db.exec(`ALTER TABLE products ADD COLUMN auto_fix_pr_reviews INTEGER DEFAULT 1`);
+      }
+
+      console.log('[Migration 035] PR review auto-fix columns added');
+    }
   }
 ];
 
