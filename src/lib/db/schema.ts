@@ -235,6 +235,13 @@ CREATE TABLE IF NOT EXISTS knowledge_entries (
   created_at TEXT DEFAULT (datetime('now'))
 );
 
+-- Application settings persisted for server-side workflows
+CREATE TABLE IF NOT EXISTS app_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+
 -- Task activities table (for real-time activity log)
 CREATE TABLE IF NOT EXISTS task_activities (
   id TEXT PRIMARY KEY,

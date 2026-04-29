@@ -1625,6 +1625,21 @@ const migrations: Migration[] = [
 
       console.log('[Migration 029] repo_readiness_checks table created');
     }
+  },
+  {
+    id: '030',
+    name: 'add_app_settings',
+    up: (db) => {
+      console.log('[Migration 030] Adding app_settings table...');
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS app_settings (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL,
+          updated_at TEXT DEFAULT (datetime('now'))
+        )
+      `);
+    }
   }
 ];
 
