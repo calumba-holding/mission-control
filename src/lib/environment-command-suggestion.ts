@@ -35,7 +35,14 @@ function cleanCommand(command: string | null | undefined): string | undefined {
     .map(line => line.trim())
     .find(Boolean);
 
-  return firstLine || undefined;
+  return firstLine
+    ?.replace(/^[$>]\s*/, '')
+    .replace(/[.;]\s*$/, '')
+    .trim() || undefined;
+}
+
+function normalizeCommand(command: string | undefined): string | undefined {
+  return command?.trim().replace(/\s+/g, ' ');
 }
 
 function safeJsonParse<T = unknown>(value: string | null | undefined): T | undefined {
@@ -95,7 +102,14 @@ export async function suggestEnvironmentFixCommand(input: {
   issue: EnvironmentIssue;
   activities: RecentActivity[];
   requestText?: string;
+  attemptedCommands?: string[];
 }): Promise<EnvironmentCommandSuggestion> {
+  const attemptedCommands = Array.from(new Set(
+    (input.attemptedCommands || [])
+      .map(command => normalizeCommand(cleanCommand(command)))
+      .filter((command): command is string => Boolean(command))
+  ));
+
   const prompt = `You are helping Mission Control recover an agent task blocked by a local environment issue.
 
 Return only JSON with this exact shape:
@@ -109,9 +123,11 @@ Return only JSON with this exact shape:
 Rules:
 - Use the task logs and error text as the source of truth.
 - Prefer an exact command already present in the logs.
+- Do not return a command that already appears in "Commands already attempted".
 - If no exact command is present, infer one only when the missing dependency/tool and host platform make the command clear.
 - The command must be one shell command line suitable for the server running Mission Control.
 - Do not include placeholders, secrets, tokens, or interactive explanation text in the command.
+- If the only clear command has already been attempted, return can_fix_with_command=false and command=null.
 - If a single concrete command is not clear, return can_fix_with_command=false and command=null.
 - Do not assume a specific OS, package manager, repository host, language, or framework unless the evidence below supports it.
 
@@ -136,6 +152,9 @@ ${input.requestText || ''}
 ${input.task.status_reason || ''}
 ${input.task.planning_dispatch_error || ''}
 
+Commands already attempted:
+${attemptedCommands.length > 0 ? attemptedCommands.map(command => `- ${command}`).join('\n') : '- (none)'}
+
 Recent activities and logs:
 ${formatActivities(input.activities)}`;
 
@@ -146,12 +165,18 @@ ${formatActivities(input.activities)}`;
   });
 
   const command = cleanCommand(result.data.command);
-  const canFixWithCommand = Boolean(result.data.can_fix_with_command && command);
+  const normalizedCommand = normalizeCommand(command);
+  const repeatsAttemptedCommand = Boolean(
+    normalizedCommand && attemptedCommands.includes(normalizedCommand)
+  );
+  const canFixWithCommand = Boolean(result.data.can_fix_with_command && command && !repeatsAttemptedCommand);
 
   return {
     canFixWithCommand,
     command: canFixWithCommand ? command : undefined,
     confidence: result.data.confidence,
-    rationale: result.data.rationale,
+    rationale: repeatsAttemptedCommand
+      ? 'The only suggested command has already been attempted for this task.'
+      : result.data.rationale,
   };
 }

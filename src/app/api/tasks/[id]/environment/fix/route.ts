@@ -31,6 +31,7 @@ interface RecentActivity {
 }
 
 interface EnvironmentFixActivity {
+  id: string;
   created_at: string;
   activity_type: string;
   message: string;
@@ -46,9 +47,59 @@ interface EnvironmentFixRun {
   retry: boolean;
 }
 
+interface EnvironmentFixMetadata {
+  issue?: EnvironmentIssue;
+  suggestion?: EnvironmentCommandSuggestion | null;
+  nextSuggestion?: EnvironmentCommandSuggestion | null;
+  command?: string;
+  commandSource?: string;
+  error?: string;
+  stdout?: string;
+  stderr?: string;
+  timeoutMs?: number;
+}
+
+type EnvironmentRecoveryAttemptStatus = 'running' | 'failed' | 'completed' | 'retry_failed' | 'stale';
+
+interface EnvironmentRecoveryAttempt {
+  id: string;
+  createdAt: string;
+  status: EnvironmentRecoveryAttemptStatus;
+  command?: string;
+  commandSource?: string;
+  message: string;
+  error?: string;
+  stdout?: string;
+  stderr?: string;
+  suggestion?: EnvironmentCommandSuggestion | null;
+  nextSuggestion?: EnvironmentCommandSuggestion | null;
+}
+
+interface EnvironmentRecoveryState {
+  issue: EnvironmentIssue;
+  running: boolean;
+  runningFix?: { command: string; startedAt: string };
+  attempts: EnvironmentRecoveryAttempt[];
+  failedCommands: string[];
+  nextSuggestion?: EnvironmentCommandSuggestion | null;
+}
+
 function compactOutput(value: string | Buffer | undefined): string {
   const text = Buffer.isBuffer(value) ? value.toString('utf8') : value || '';
   return text.length > MAX_OUTPUT_CHARS ? text.slice(-MAX_OUTPUT_CHARS) : text;
+}
+
+function normalizeCommand(command: string | undefined): string | undefined {
+  return command?.trim().replace(/\s+/g, ' ');
+}
+
+function safeJsonParse<T = unknown>(value: string | null | undefined): T | null {
+  if (!value) return null;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return null;
+  }
 }
 
 function formatCommandFailure(
@@ -75,12 +126,14 @@ function collectIssueText(task: Task, activities: RecentActivity[], requestText?
   ];
 }
 
-function recordActivity(taskId: string, agentId: string | null, type: string, message: string, metadata?: Record<string, unknown>) {
+function recordActivity(taskId: string, agentId: string | null, type: string, message: string, metadata?: object): string {
+  const id = crypto.randomUUID();
   run(
     `INSERT INTO task_activities (id, task_id, agent_id, activity_type, message, metadata, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [crypto.randomUUID(), taskId, agentId, type, message, metadata ? JSON.stringify(metadata) : null, new Date().toISOString()]
+    [id, taskId, agentId, type, message, metadata ? JSON.stringify(metadata) : null, new Date().toISOString()]
   );
+  return id;
 }
 
 function getRunningEnvironmentFix(taskId: string): { command: string; startedAt: string } | null {
@@ -88,7 +141,7 @@ function getRunningEnvironmentFix(taskId: string): { command: string; startedAt:
   if (inMemory) return inMemory;
 
   const latest = queryOne<EnvironmentFixActivity>(
-    `SELECT created_at, activity_type, message, metadata
+    `SELECT id, created_at, activity_type, message, metadata
      FROM task_activities
      WHERE task_id = ?
        AND activity_type IN ('environment_fix_started', 'environment_fix_failed', 'environment_fix_completed', 'environment_fix_retry_failed')
@@ -103,14 +156,153 @@ function getRunningEnvironmentFix(taskId: string): { command: string; startedAt:
   if (!Number.isFinite(startedAtMs) || Date.now() - startedAtMs > RUNNING_STALE_MS) return null;
 
   let command = latest.message.replace(/^Running approved environment command:\s*/i, '').trim();
-  try {
-    const metadata = latest.metadata ? JSON.parse(latest.metadata) as { command?: string } : null;
-    if (metadata?.command) command = metadata.command;
-  } catch {
-    // Ignore malformed historical metadata; the activity message still carries the command.
-  }
+  const metadata = safeJsonParse<EnvironmentFixMetadata>(latest.metadata);
+  if (metadata?.command) command = metadata.command;
 
   return { command, startedAt: latest.created_at };
+}
+
+function getEnvironmentFixActivities(taskId: string, limit = 30): EnvironmentFixActivity[] {
+  return queryAll<EnvironmentFixActivity>(
+    `SELECT id, created_at, activity_type, message, metadata
+     FROM task_activities
+     WHERE task_id = ?
+       AND activity_type IN ('environment_fix_started', 'environment_fix_failed', 'environment_fix_completed', 'environment_fix_retry_failed')
+     ORDER BY created_at DESC
+     LIMIT ?`,
+    [taskId, limit]
+  );
+}
+
+function getRecentContextActivities(taskId: string): RecentActivity[] {
+  return queryAll<RecentActivity>(
+    `SELECT created_at, activity_type, message, metadata
+     FROM task_activities
+     WHERE task_id = ?
+       AND activity_type IN (
+         'environment_blocked',
+         'status_changed',
+         'environment_fix_started',
+         'environment_fix_failed',
+         'environment_fix_completed',
+         'environment_fix_retry_failed'
+       )
+     ORDER BY created_at DESC
+     LIMIT 15`,
+    [taskId]
+  );
+}
+
+function commandFromActivity(activity: EnvironmentFixActivity, metadata: EnvironmentFixMetadata | null): string | undefined {
+  if (metadata?.command) return metadata.command;
+  const fromStartedMessage = activity.message.replace(/^Running approved environment command:\s*/i, '').trim();
+  return fromStartedMessage === activity.message ? undefined : fromStartedMessage;
+}
+
+function buildRecoveryState(taskId: string, issue: EnvironmentIssue): EnvironmentRecoveryState {
+  const runningFix = getRunningEnvironmentFix(taskId);
+  const activities = getEnvironmentFixActivities(taskId).reverse();
+  const attempts: EnvironmentRecoveryAttempt[] = [];
+
+  for (const activity of activities) {
+    const metadata = safeJsonParse<EnvironmentFixMetadata>(activity.metadata);
+    const command = commandFromActivity(activity, metadata);
+
+    if (activity.activity_type === 'environment_fix_started') {
+      attempts.push({
+        id: activity.id,
+        createdAt: activity.created_at,
+        status: 'running',
+        command,
+        commandSource: metadata?.commandSource,
+        message: activity.message,
+        suggestion: metadata?.suggestion,
+      });
+      continue;
+    }
+
+    const status = activity.activity_type === 'environment_fix_completed'
+      ? 'completed'
+      : activity.activity_type === 'environment_fix_retry_failed'
+        ? 'retry_failed'
+        : 'failed';
+    const matchingAttempt = command
+      ? [...attempts].reverse().find((attempt) => (
+        attempt.status === 'running' &&
+        normalizeCommand(attempt.command) === normalizeCommand(command)
+      ))
+      : undefined;
+    const patch: Partial<EnvironmentRecoveryAttempt> = {
+      status,
+      message: activity.message,
+      command,
+      error: metadata?.error,
+      stdout: metadata?.stdout,
+      stderr: metadata?.stderr,
+      suggestion: metadata?.suggestion,
+      nextSuggestion: metadata?.nextSuggestion,
+    };
+
+    if (matchingAttempt) {
+      Object.assign(matchingAttempt, patch);
+    } else {
+      attempts.push({
+        id: activity.id,
+        createdAt: activity.created_at,
+        status,
+        message: activity.message,
+        command,
+        error: metadata?.error,
+        stdout: metadata?.stdout,
+        stderr: metadata?.stderr,
+        suggestion: metadata?.suggestion,
+        nextSuggestion: metadata?.nextSuggestion,
+      });
+    }
+  }
+
+  const now = Date.now();
+  for (const attempt of attempts) {
+    if (attempt.status !== 'running') continue;
+    const startedAtMs = new Date(attempt.createdAt).getTime();
+    if (!Number.isFinite(startedAtMs) || now - startedAtMs > RUNNING_STALE_MS) {
+      attempt.status = 'stale';
+    }
+  }
+
+  const failedCommands = Array.from(new Set(
+    attempts
+      .filter((attempt) => attempt.status === 'failed' || attempt.status === 'retry_failed')
+      .map((attempt) => normalizeCommand(attempt.command))
+      .filter((command): command is string => Boolean(command))
+  ));
+  const latestNextSuggestion = [...attempts]
+    .reverse()
+    .map((attempt) => attempt.nextSuggestion)
+    .find((suggestion) => suggestion?.canFixWithCommand && suggestion.command);
+
+  return {
+    issue,
+    running: Boolean(runningFix),
+    runningFix: runningFix || undefined,
+    attempts: attempts.reverse(),
+    failedCommands,
+    nextSuggestion: latestNextSuggestion || null,
+  };
+}
+
+function updateActivityMetadata(activityId: string, metadata: Record<string, unknown>) {
+  run(
+    `UPDATE task_activities
+     SET metadata = ?
+     WHERE id = ?`,
+    [JSON.stringify(metadata), activityId]
+  );
+}
+
+function hasFailedCommand(recovery: EnvironmentRecoveryState, command: string): boolean {
+  const normalized = normalizeCommand(command);
+  return Boolean(normalized && recovery.failedCommands.includes(normalized));
 }
 
 function updateTaskState(taskId: string, statusReason: string, planningError?: string | null): Task | null {
@@ -149,18 +341,54 @@ async function finishEnvironmentFix(
 
   if (error) {
     const message = formatCommandFailure(command, error, stdout, stderr);
+    const planningError = `Environment fix failed (${issue.code}): ${message}`;
     updateTaskState(
       task.id,
       `Environment fix failed: ${issue.title}`,
-      `Environment fix failed (${issue.code}): ${message}`
+      planningError
     );
 
-    recordActivity(task.id, task.assigned_agent_id, 'environment_fix_failed', `Environment fix failed: ${issue.title}`, {
+    const failureMetadata: EnvironmentFixMetadata = {
       issue,
       suggestion,
       command,
       error: message,
-    });
+    };
+    const failureActivityId = recordActivity(
+      task.id,
+      task.assigned_agent_id,
+      'environment_fix_failed',
+      `Environment fix failed: ${issue.title}`,
+      failureMetadata
+    );
+
+    try {
+      const failedTask = queryOne<Task>('SELECT * FROM tasks WHERE id = ?', [task.id]) || task;
+      const contextActivities = getRecentContextActivities(task.id);
+      const nextIssue = classifyEnvironmentIssueFromTexts(collectIssueText(failedTask, contextActivities, message)) || issue;
+      const recovery = buildRecoveryState(task.id, nextIssue);
+      const nextSuggestion = await suggestEnvironmentFixCommand({
+        task: failedTask,
+        issue: nextIssue,
+        activities: contextActivities,
+        requestText: message,
+        attemptedCommands: recovery.failedCommands,
+      });
+
+      if (nextSuggestion.canFixWithCommand && nextSuggestion.command) {
+        updateActivityMetadata(failureActivityId, {
+          ...failureMetadata,
+          nextSuggestion,
+        });
+        updateTaskState(
+          task.id,
+          `Environment fix failed: ${nextIssue.title}. Suggested next action ready.`,
+          planningError
+        );
+      }
+    } catch (suggestionError) {
+      console.error('[Environment Fix] Failed to suggest next recovery action:', suggestionError);
+    }
     return;
   }
 
@@ -239,6 +467,43 @@ function startEnvironmentFix(runConfig: EnvironmentFixRun): { command: string; s
   return { command, startedAt };
 }
 
+export async function GET(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id: taskId } = await params;
+
+  try {
+    const task = queryOne<Task>('SELECT * FROM tasks WHERE id = ?', [taskId]);
+    if (!task) {
+      return NextResponse.json({ error: 'Task not found' }, { status: 404 });
+    }
+
+    const activities = getRecentContextActivities(taskId);
+    const issue = classifyEnvironmentIssueFromTexts(collectIssueText(task, activities));
+    if (!issue) {
+      return NextResponse.json({
+        success: true,
+        issue: null,
+        recovery: null,
+        task,
+      });
+    }
+
+    return NextResponse.json({
+      success: true,
+      issue,
+      recovery: buildRecoveryState(taskId, issue),
+      task,
+    });
+  } catch (error) {
+    console.error('[Environment Fix] Failed to load recovery state:', error);
+    return NextResponse.json({
+      error: error instanceof Error ? error.message : 'Failed to load environment recovery state',
+    }, { status: 500 });
+  }
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -253,6 +518,7 @@ export async function POST(
       approvedCommand?: string;
       userProvidedCommand?: boolean;
       autoSuggestCommand?: boolean;
+      suggestOnly?: boolean;
     }));
     const task = queryOne<Task>('SELECT * FROM tasks WHERE id = ?', [taskId]);
 
@@ -264,15 +530,7 @@ export async function POST(
       return NextResponse.json({ error: 'Completed tasks cannot be retried.' }, { status: 409 });
     }
 
-    const activities = queryAll<RecentActivity>(
-      `SELECT created_at, activity_type, message, metadata
-       FROM task_activities
-       WHERE task_id = ?
-         AND activity_type IN ('environment_blocked', 'status_changed')
-       ORDER BY created_at DESC
-       LIMIT 10`,
-      [taskId]
-    );
+    const activities = getRecentContextActivities(taskId);
     const issue = classifyEnvironmentIssueFromTexts(collectIssueText(task, activities, body.reason));
 
     if (!issue) {
@@ -288,7 +546,8 @@ export async function POST(
       }, { status: 409 });
     }
 
-    const runningFix = getRunningEnvironmentFix(taskId);
+    let recovery = buildRecoveryState(taskId, issue);
+    const runningFix = recovery.runningFix;
     if (runningFix) {
       const runningTask = task.status_reason?.toLowerCase().startsWith('environment fix running:')
         ? task
@@ -302,6 +561,7 @@ export async function POST(
         issue,
         suggestion: null,
         fix: { command: runningFix.command, startedAt: runningFix.startedAt },
+        recovery,
         task: runningTask,
       }, { status: 202 });
     }
@@ -318,6 +578,7 @@ export async function POST(
           issue,
           activities,
           requestText: body.reason,
+          attemptedCommands: recovery.failedCommands,
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to suggest an environment command';
@@ -333,15 +594,49 @@ export async function POST(
       }
     }
 
+    if (body.suggestOnly) {
+      const suggestedRecovery = suggestion?.canFixWithCommand && suggestion.command
+        ? { ...recovery, nextSuggestion: suggestion }
+        : recovery;
+
+      if (!suggestion?.canFixWithCommand || !suggestion.command) {
+        return NextResponse.json({
+          success: false,
+          error: suggestion?.rationale || 'Mission Control could not determine a new setup command to run.',
+          issue,
+          suggestion,
+          recovery: suggestedRecovery,
+        }, { status: 409 });
+      }
+
+      return NextResponse.json({
+        success: true,
+        issue,
+        suggestion,
+        recovery: suggestedRecovery,
+        task,
+      });
+    }
+
     if (!commandToRun) {
       return NextResponse.json({
         error: 'Mission Control could not determine a setup command to run.',
         issue,
         suggestion,
+        recovery,
       }, { status: 409 });
     }
 
-    if (approvedCommand && hasEnvironmentIssueCommand(issue) && approvedCommand !== issue.action.command) {
+    if (!body.userProvidedCommand && hasFailedCommand(recovery, commandToRun)) {
+      return NextResponse.json({
+        error: 'That exact command already failed for this task. Review the recovery history or approve a different command.',
+        issue,
+        suggestion,
+        recovery,
+      }, { status: 409 });
+    }
+
+    if (approvedCommand && hasEnvironmentIssueCommand(issue) && !body.userProvidedCommand && approvedCommand !== issue.action.command) {
       return NextResponse.json({
         error: 'The command must be explicitly approved and must match the command shown in the UI.',
         issue,
@@ -364,6 +659,7 @@ export async function POST(
       retry: body.retry !== false,
     });
     const updatedTask = queryOne<Task>('SELECT * FROM tasks WHERE id = ?', [taskId]);
+    recovery = buildRecoveryState(taskId, issue);
 
     return NextResponse.json({
       success: true,
@@ -374,6 +670,7 @@ export async function POST(
       issue,
       suggestion,
       fix: fixRun,
+      recovery,
       task: updatedTask,
     }, { status: 202 });
   } catch (error) {

@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, type MouseEvent } from 'react';
-import { AlertTriangle, CheckCircle2, Clipboard, ExternalLink, RefreshCw, Wrench } from 'lucide-react';
+import { useEffect, useState, type MouseEvent } from 'react';
+import { AlertTriangle, CheckCircle2, Clipboard, ExternalLink, History, RefreshCw, Wrench } from 'lucide-react';
 import { classifyEnvironmentIssueFromTexts, type EnvironmentIssue } from '@/lib/environment-issues';
 import { useMissionControl } from '@/lib/store';
 import type { Task } from '@/lib/types';
@@ -18,6 +18,7 @@ interface TaskActionResponse {
   userMessage?: string;
   task?: Task;
   issue?: EnvironmentIssue;
+  recovery?: EnvironmentRecoveryState | null;
   running?: boolean;
   started?: boolean;
   fixed?: boolean;
@@ -26,11 +27,55 @@ interface TaskActionResponse {
   suggestion?: { command?: string; rationale?: string };
 }
 
+interface EnvironmentRecoverySuggestion {
+  canFixWithCommand?: boolean;
+  command?: string;
+  rationale?: string;
+  confidence?: 'low' | 'medium' | 'high';
+}
+
+interface EnvironmentRecoveryAttempt {
+  id: string;
+  createdAt: string;
+  status: 'running' | 'failed' | 'completed' | 'retry_failed' | 'stale';
+  command?: string;
+  commandSource?: string;
+  message: string;
+  error?: string;
+  stdout?: string;
+  stderr?: string;
+  suggestion?: EnvironmentRecoverySuggestion | null;
+  nextSuggestion?: EnvironmentRecoverySuggestion | null;
+}
+
+interface EnvironmentRecoveryState {
+  running: boolean;
+  runningFix?: { command: string; startedAt: string };
+  attempts: EnvironmentRecoveryAttempt[];
+  failedCommands: string[];
+  nextSuggestion?: EnvironmentRecoverySuggestion | null;
+}
+
 export function getTaskEnvironmentIssue(task: Task): EnvironmentIssue | null {
   return classifyEnvironmentIssueFromTexts([
     task.status_reason,
     task.planning_dispatch_error,
   ]);
+}
+
+function summarizeText(text: string | undefined, maxLength = 180): string | null {
+  if (!text) return null;
+  const line = text
+    .split(/\r?\n/)
+    .map(part => part.trim())
+    .find(Boolean);
+  if (!line) return null;
+  return line.length > maxLength ? `${line.slice(0, maxLength - 1)}...` : line;
+}
+
+function attemptStatusLabel(status: EnvironmentRecoveryAttempt['status']): string {
+  if (status === 'retry_failed') return 'Retry failed';
+  return status.charAt(0).toUpperCase() + status.slice(1);
 }
 
 export function EnvironmentIssuePanel({ task, compact = false, className = '' }: EnvironmentIssuePanelProps) {
@@ -44,12 +89,51 @@ export function EnvironmentIssuePanel({ task, compact = false, className = '' }:
   const [isConfirmingCommand, setIsConfirmingCommand] = useState(false);
   const [isEnteringCommand, setIsEnteringCommand] = useState(false);
   const [userCommand, setUserCommand] = useState('');
+  const [recovery, setRecovery] = useState<EnvironmentRecoveryState | null>(null);
+  const issueCode = issue?.code;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!issueCode) {
+      setRecovery(null);
+      return;
+    }
+
+    fetch(`/api/tasks/${task.id}/environment/fix`)
+      .then((res) => res.json())
+      .then((data: TaskActionResponse) => {
+        if (cancelled) return;
+        setRecovery(data.recovery || null);
+        if (data.task) updateTask(data.task);
+      })
+      .catch(() => {
+        if (!cancelled) setRecovery(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [issueCode, task.id, task.updated_at, updateTask]);
 
   if (!issue) return null;
 
   const fixStartedAt = task.updated_at ? new Date(task.updated_at).getTime() : NaN;
   const fixIsFresh = Number.isFinite(fixStartedAt) && Date.now() - fixStartedAt < 11 * 60 * 1000;
-  const fixIsRunning = (task.status_reason?.toLowerCase().startsWith('environment fix running:') ?? false) && fixIsFresh;
+  const fixIsRunning = Boolean(recovery?.running) || ((task.status_reason?.toLowerCase().startsWith('environment fix running:') ?? false) && fixIsFresh);
+  const suggestedCommand = recovery?.nextSuggestion?.command || issue.action.command;
+  const approvedCommand = userCommand.trim() || suggestedCommand || '';
+  const recentAttempts = recovery?.attempts.slice(0, 3) || [];
+  const approvedCommandSource = userCommand.trim()
+    ? recovery?.nextSuggestion?.command === userCommand.trim()
+      ? 'Recovery analysis'
+      : 'User input'
+    : recovery?.nextSuggestion?.command
+      ? 'Recovery analysis'
+      : issue.action.commandSource || 'Detected issue';
+  const approvedCommandRationale = recovery?.nextSuggestion?.command === approvedCommand
+    ? recovery.nextSuggestion.rationale
+    : undefined;
 
   const stop = (event: MouseEvent) => {
     event.stopPropagation();
@@ -57,16 +141,15 @@ export function EnvironmentIssuePanel({ task, compact = false, className = '' }:
 
   const applyResponse = (data: TaskActionResponse) => {
     if (data.task) updateTask(data.task);
+    if (data.recovery !== undefined) setRecovery(data.recovery);
   };
-
-  const approvedCommand = issue.action.command || userCommand.trim();
 
   const handleCopyCommand = async (event: MouseEvent) => {
     stop(event);
-    if (!issue.action.command) return;
+    if (!suggestedCommand) return;
 
     try {
-      await navigator.clipboard.writeText(issue.action.command);
+      await navigator.clipboard.writeText(suggestedCommand);
       setCopied(true);
       setMessage('Command copied.');
       setError(null);
@@ -128,7 +211,7 @@ export function EnvironmentIssuePanel({ task, compact = false, className = '' }:
           code: issue.code,
           retry: true,
           approvedCommand,
-          userProvidedCommand: !issue.action.command,
+          userProvidedCommand: approvedCommand !== issue.action.command,
         }),
       });
       const data = await res.json().catch(() => ({} as TaskActionResponse));
@@ -172,6 +255,7 @@ export function EnvironmentIssuePanel({ task, compact = false, className = '' }:
           code: issue.code,
           retry: true,
           autoSuggestCommand: true,
+          suggestOnly: true,
         }),
       });
       const data = await res.json().catch(() => ({} as TaskActionResponse));
@@ -186,12 +270,12 @@ export function EnvironmentIssuePanel({ task, compact = false, className = '' }:
         return;
       }
 
-      const ran = data.fix?.command ? ` Ran: ${data.fix.command}` : '';
-      if (data.running) {
-        const command = data.fix?.command ? ` Running: ${data.fix.command}` : '';
-        setMessage(`Environment fix started.${command} The agent will retry automatically if it succeeds.`);
+      if (data.suggestion?.command) {
+        setUserCommand(data.suggestion.command);
+        setIsConfirmingCommand(true);
+        setMessage('Review the suggested command before running it.');
       } else {
-        setMessage(data.retried ? `Fix ran and agent retry started.${ran}` : `Fix ran successfully.${ran}`);
+        setMessage('No command suggestion is available yet.');
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Auto fix failed.');
@@ -225,18 +309,61 @@ export function EnvironmentIssuePanel({ task, compact = false, className = '' }:
         </div>
       )}
 
-      {issue.action.command && !compact && (
+      {!compact && recovery?.nextSuggestion?.command && (
+        <div className="mt-3 rounded-md border border-white/15 bg-black/20 p-2.5">
+          <div className="text-[11px] font-semibold uppercase opacity-70">Next suggested action</div>
+          <code className="mt-1 block rounded border border-white/15 bg-black/30 px-2 py-1 text-[11px] break-all">
+            {recovery.nextSuggestion.command}
+          </code>
+          {recovery.nextSuggestion.rationale && (
+            <div className="mt-1 text-[11px] opacity-75">
+              {recovery.nextSuggestion.rationale}
+            </div>
+          )}
+        </div>
+      )}
+
+      {!compact && recentAttempts.length > 0 && (
+        <div className="mt-3 rounded-md border border-white/15 bg-black/15 p-2.5">
+          <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase opacity-70">
+            <History className="w-3.5 h-3.5" />
+            Recovery history
+          </div>
+          <div className="mt-2 space-y-2">
+            {recentAttempts.map((attempt) => {
+              const detail = summarizeText(attempt.error || attempt.stderr || attempt.stdout || attempt.message);
+              return (
+                <div key={attempt.id} className="border-t border-white/10 pt-2 first:border-t-0 first:pt-0">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
+                    <span className="font-semibold">{attemptStatusLabel(attempt.status)}</span>
+                    <span className="opacity-60">{new Date(attempt.createdAt).toLocaleTimeString()}</span>
+                  </div>
+                  {attempt.command && (
+                    <code className="mt-1 block break-all text-[10px] opacity-80">{attempt.command}</code>
+                  )}
+                  {detail && (
+                    <div className="mt-1 text-[10px] opacity-70">{detail}</div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {suggestedCommand && !compact && !recovery?.nextSuggestion?.command && (
         <code className="mt-2 block rounded border border-white/15 bg-black/20 px-2 py-1 text-[11px] break-all opacity-90">
-          {issue.action.command}
+          {suggestedCommand}
         </code>
       )}
 
       <div className={`mt-2 flex ${compact ? 'flex-col' : 'flex-wrap'} gap-2`}>
-        {issue.action.mode === 'command' && issue.action.command && (
+        {suggestedCommand && (
           <button
             type="button"
             onClick={(event) => {
               stop(event);
+              setUserCommand(suggestedCommand);
               setIsConfirmingCommand(true);
               setIsEnteringCommand(false);
               setError(null);
@@ -246,11 +373,11 @@ export function EnvironmentIssuePanel({ task, compact = false, className = '' }:
             className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded border border-white/20 bg-white/10 px-2.5 text-[11px] font-medium hover:bg-white/20 disabled:opacity-50"
           >
             <Wrench className={`w-3.5 h-3.5 ${fixIsRunning || isFixing ? 'animate-spin' : ''}`} />
-            {fixIsRunning ? 'Fix running...' : isFixing ? 'Running command...' : issue.action.label}
+            {fixIsRunning ? 'Fix running...' : isFixing ? 'Running command...' : 'Review suggested fix'}
           </button>
         )}
 
-        {issue.action.mode === 'manual' && !issue.action.command && (
+        {issue.action.mode === 'manual' && !suggestedCommand && (
           <button
             type="button"
             onClick={handleAutoFix}
@@ -258,11 +385,11 @@ export function EnvironmentIssuePanel({ task, compact = false, className = '' }:
             className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded border border-white/20 bg-white/10 px-2.5 text-[11px] font-medium hover:bg-white/20 disabled:opacity-50"
           >
             <Wrench className={`w-3.5 h-3.5 ${fixIsRunning || isFixing ? 'animate-spin' : ''}`} />
-            {fixIsRunning ? 'Fix running...' : isFixing ? 'Auto fixing...' : 'Auto fix & retry'}
+            {fixIsRunning ? 'Fix running...' : isFixing ? 'Finding command...' : 'Find fix command'}
           </button>
         )}
 
-        {issue.action.mode === 'manual' && !issue.action.command && (
+        {issue.action.mode === 'manual' && !suggestedCommand && (
           <button
             type="button"
             onClick={(event) => {
@@ -290,14 +417,14 @@ export function EnvironmentIssuePanel({ task, compact = false, className = '' }:
           </a>
         )}
 
-        {issue.action.command && (
+        {suggestedCommand && (
           <button
             type="button"
             onClick={handleCopyCommand}
             className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded border border-white/15 px-2.5 text-[11px] hover:bg-white/10"
           >
             {copied ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Clipboard className="w-3.5 h-3.5" />}
-            {copied ? 'Copied' : compact ? 'Copy fix' : issue.action.mode === 'manual' ? issue.action.label : 'Copy command'}
+            {copied ? 'Copied' : compact ? 'Copy fix' : 'Copy command'}
           </button>
         )}
 
@@ -318,7 +445,7 @@ export function EnvironmentIssuePanel({ task, compact = false, className = '' }:
         </div>
       )}
 
-      {isEnteringCommand && !issue.action.command && (
+      {isEnteringCommand && !suggestedCommand && (
         <div
           className="mt-3 rounded-md border border-white/20 bg-black/25 p-3"
           onClick={(event) => event.stopPropagation()}
@@ -380,8 +507,13 @@ export function EnvironmentIssuePanel({ task, compact = false, className = '' }:
             {approvedCommand}
           </code>
           <div className="mt-1 text-[10px] opacity-70">
-            Source: {issue.action.commandSource || 'User input'}
+            Source: {approvedCommandSource}
           </div>
+          {approvedCommandRationale && (
+            <div className="mt-1 text-[10px] opacity-70">
+              {approvedCommandRationale}
+            </div>
+          )}
           <div className="mt-3 flex gap-2">
             <button
               type="button"
