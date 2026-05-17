@@ -48,6 +48,15 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params;
 
+    // Parse optional body (may contain review_fix_message for PR review auto-fix)
+    let reviewFixMessage: string | undefined;
+    try {
+      const body = await request.json();
+      reviewFixMessage = body?.review_fix_message;
+    } catch {
+      // No body or invalid JSON — that's fine for normal dispatches
+    }
+
     // Keep canonical agent catalog synced before every dispatch (best-effort)
     await syncGatewayAgentsToCatalog({ reason: 'dispatch' }).catch(err => {
       console.warn('[Dispatch] agent catalog sync failed:', err);
@@ -192,6 +201,10 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       } catch {
         // MCP injection is best-effort — never block dispatch
       }
+    }
+
+    if (reviewFixMessage) {
+      finalMessage = `${reviewFixMessage}\n\n---\n\n${finalMessage}`;
     }
 
     const runtimeSettings = getAgentRuntimeSettings();
